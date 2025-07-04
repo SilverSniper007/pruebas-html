@@ -1,238 +1,288 @@
-/* Shivving (IE8 is not supported, but at least it won't look as awful)
-/* ========================================================================== */
+/* JS for preset "Menu V2" */
+(function() {
+	$(function() {
+		$('.menu-wrapper').each(function() {
+			initMenu($(this))
+		});
+	});
 
-(function (document) {
-	var
-	head = document.head = document.getElementsByTagName('head')[0] || document.documentElement,
-	elements = 'article aside audio bdi canvas data datalist details figcaption figure footer header hgroup mark meter nav output picture progress section summary time video x'.split(' '),
-	elementsLength = elements.length,
-	elementsIndex = 0,
-	element;
+	// Make :active pseudo classes work on iOS
+	document.addEventListener("touchstart", function() {}, false);
 
-	while (elementsIndex < elementsLength) {
-		element = document.createElement(elements[++elementsIndex]);
-	}
+	const initMenu = function($menuWrapper) {
+		const $body = $('body');
+		const $menu = $('.ed-menu', $menuWrapper);
+		const $menuLinks = $('a', $menu);
+		const $menuTrigger = $('.menu-trigger', $menuWrapper);
+		const $banner = $('.banner').first();
 
-	element.innerHTML = 'x<style>' +
-		'article,aside,details,figcaption,figure,footer,header,hgroup,nav,section{display:block}' +
-		'audio[controls],canvas,video{display:inline-block}' +
-		'[hidden],audio{display:none}' +
-		'mark{background:#FF0;color:#000}' +
-	'</style>';
+		const smoothScrollOffset = 20;
+		
+		// Set aria attributes
+		$menuTrigger.attr({
+				'aria-expanded': 'false',
+				'aria-controls': $menu.attr('id'),
+		});
 
-	return head.insertBefore(element.lastChild, head.firstChild);
-})(document);
-
-/* Prototyping
-/* ========================================================================== */
-
-(function (window, ElementPrototype, ArrayPrototype, polyfill) {
-	function NodeList() { [polyfill] }
-	NodeList.prototype.length = ArrayPrototype.length;
-
-	ElementPrototype.matchesSelector = ElementPrototype.matchesSelector ||
-	ElementPrototype.mozMatchesSelector ||
-	ElementPrototype.msMatchesSelector ||
-	ElementPrototype.oMatchesSelector ||
-	ElementPrototype.webkitMatchesSelector ||
-	function matchesSelector(selector) {
-		return ArrayPrototype.indexOf.call(this.parentNode.querySelectorAll(selector), this) > -1;
+		toggleClassOnClick($body.add($menu), $menuTrigger, null, 'open open-menu'); // Keep open on $menu for backward compatibility
+		activateSmoothScroll($menuLinks.add($('.scroll a')), smoothScrollOffset);
+		addClassOnVisibleLinkTargets($menuLinks, 'active', 2 / 3);
+		handleSticky($menuWrapper, 'sticky', $banner);
 	};
 
-	ElementPrototype.ancestorQuerySelectorAll = ElementPrototype.ancestorQuerySelectorAll ||
-	ElementPrototype.mozAncestorQuerySelectorAll ||
-	ElementPrototype.msAncestorQuerySelectorAll ||
-	ElementPrototype.oAncestorQuerySelectorAll ||
-	ElementPrototype.webkitAncestorQuerySelectorAll ||
-	function ancestorQuerySelectorAll(selector) {
-		for (var cite = this, newNodeList = new NodeList; cite = cite.parentElement;) {
-			if (cite.matchesSelector(selector)) ArrayPrototype.push.call(newNodeList, cite);
+	/**
+	 * Observe element's height changes and reload the initMenu() function
+	 *
+	 * @param {HTMLElement} elm Element to observe
+	 * @param {function} callback to call when elmement's height changed
+	 */
+	const observeHeightChange = function(elm, callback) {
+		if (!('ResizeObserver' in window) || elm == null) return;
+
+		const ro = new ResizeObserver(callback);
+		ro.observe(elm);
+	}
+
+	/**
+	 * Toggles class on a target when a trigger is clicked
+	 * 
+	 * @param {jQuery} $target The target to apply the CSS class to
+	 * @param {jQuery} $trigger The Trigger
+	 * @param {jQuery} $closeTrigger Optional close trigger
+	 * @param {string} cssClass CSS Class to toggle on the target
+	 */
+	const toggleClassOnClick = function($target, $trigger, $closeTrigger, cssClass) {
+
+		// Reset in case class "open" was saved accidentally
+		$target.removeClass(cssClass);
+		$trigger.removeClass(cssClass).attr('aria-expanded', 'false');
+
+		// Click on trigger toggles class "open"
+		$trigger.off('.toggle').on('click.toggle', function() {
+			const isExpanded = $(this).attr('aria-expanded') === 'true';
+			$(this).toggleClass(cssClass).attr('aria-expanded', !isExpanded);
+			$target.toggleClass(cssClass);
+		});
+
+		// Close target when link inside is clicked
+		$target.find('a').click(function() {
+			$target.removeClass(cssClass);
+			$trigger.removeClass(cssClass).attr('aria-expanded', 'false');
+		});
+
+		if (!$closeTrigger || !$closeTrigger.length) {
+			return;
 		}
 
-		return newNodeList;
+		$closeTrigger.click(function() {
+			$target.removeClass(cssClass);
+			$trigger.removeClass(cssClass).attr('aria-expanded', 'false');
+		});
 	};
 
-	ElementPrototype.ancestorQuerySelector = ElementPrototype.ancestorQuerySelector ||
-	ElementPrototype.mozAncestorQuerySelector ||
-	ElementPrototype.msAncestorQuerySelector ||
-	ElementPrototype.oAncestorQuerySelector ||
-	ElementPrototype.webkitAncestorQuerySelector ||
-	function ancestorQuerySelector(selector) {
-		return this.ancestorQuerySelectorAll(selector)[0] || null;
+	/**
+	 * Smooth scroll to link targets
+	 * 
+	 * @param {jQuery} $scrollLinks The links
+	 * @param {jQuery} scrollOffset Offset to subtract from the scroll target position (e.g. for fixed positioned elements like a menu)
+	 */
+	const activateSmoothScroll = function($scrollLinks, scrollOffset) {
+		if (typeof scrollOffset === 'undefined') {
+			scrollOffset = 0;
+		}
+
+		const determineTarget = function($trigger, hash) {
+			if (hash == '#!next') {
+				return $trigger.closest('.ed-element').next();
+			}
+
+			return $(hash);
+		}
+
+		$scrollLinks.click(function(e) {
+			const $target = determineTarget($(this), this.hash);
+			if (!$target.length) return;
+			e.preventDefault();
+
+			viewport.scrollTo($target, 'top', 500, 0);
+
+		});
 	};
-})(this, Element.prototype, Array.prototype);
 
-/* Helper Functions
-/* ========================================================================== */
+	/**
+	 * We are using the fill property on an element to pass user's choices from CSS to JavaScript
+	 * 
+	 * @param {jQuery} $element
+	 */
+	const getStickyMode = function($element) {
+		const fillValue = getComputedStyle($element[0]).fill;
 
-function generateTableRow() {
-	var emptyColumn = document.createElement('tr');
+		return fillValue === 'rgb(255, 0, 0)' ?
+			'sticky_banner' :
+			fillValue === 'rgb(0, 255, 0)' ?
+			'sticky_menu' :
+			fillValue === 'rgb(0, 0, 255)' ?
+			'sticky_instant' :
+			fillValue === 'rgb(255, 255, 255)' ?
+			'sticky_reverse' :
+			'sticky_none';
+	};
 
-	emptyColumn.innerHTML = '<td><a class="cut">-</a><span contenteditable></span></td>' +
-		'<td><span contenteditable></span></td>' +
-		'<td><span data-prefix>$</span><span contenteditable>0.00</span></td>' +
-		'<td><span contenteditable>0</span></td>' +
-		'<td><span data-prefix>$</span><span>0.00</span></td>';
+	/**
+	 * Adds a class to an element when not currently visible
+	 * 
+	 * @param {jQuery} $element The element to handle stickyness for
+	 * @param {string} cssClass The actual CSS class to be applied to the element when it's above a certain scroll position
+	 * @param {jQuery} $banner A banner to reference the scroll position to
+	 */
+	const handleSticky = function($element, cssClass, $banner) {
+		let triggerPos = 0,
+			offset = 0;
+		let menuWrapperHeight = $element.outerHeight();
+		let mode;
+		let prevScroll = 0;
+		$element.removeClass(cssClass);
+		
+		const toggleSpacer = function(toggle) {
+			document.body.style.setProperty('--spacer-height', toggle ? menuWrapperHeight + 'px' : '');
+		};
 
-	return emptyColumn;
-}
+		const handleScroll = function() {
+			if (!$element.length || mode === 'sticky_none') return;
+			//if (!$element.length || mode === 'sticky_none' || mode === 'sticky_instant') return;
 
-function parseFloatHTML(element) {
-	return parseFloat(element.innerHTML.replace(/[^\d\.\-]+/g, '')) || 0;
-}
+			const isReverse = mode === 'sticky_reverse',
+				curScroll = viewport.getScrollTop();
 
-function parsePrice(number) {
-	return number.toFixed(2).replace(/(\d)(?=(\d\d\d)+([^\d]|$))/g, '$1,');
-}
+			if (triggerPos <= curScroll && (!isReverse || prevScroll > curScroll)) {
+				$element.addClass(cssClass);
+				toggleSpacer(true);
+			} else {
+				$element.removeClass(cssClass);
+				toggleSpacer(false);
+			}
 
-/* Update Number
-/* ========================================================================== */
-
-function updateNumber(e) {
-	var
-	activeElement = document.activeElement,
-	value = parseFloat(activeElement.innerHTML),
-	wasPrice = activeElement.innerHTML == parsePrice(parseFloatHTML(activeElement));
-
-	if (!isNaN(value) && (e.keyCode == 38 || e.keyCode == 40 || e.wheelDeltaY)) {
-		e.preventDefault();
-
-		value += e.keyCode == 38 ? 1 : e.keyCode == 40 ? -1 : Math.round(e.wheelDelta * 0.025);
-		value = Math.max(value, 0);
-
-		activeElement.innerHTML = wasPrice ? parsePrice(value) : value;
-	}
-
-	updateInvoice();
-}
-
-/* Update Invoice
-/* ========================================================================== */
-
-function updateInvoice() {
-	var total = 0;
-	var cells, price, total, a, i;
-
-	// update inventory cells
-	// ======================
-
-	for (var a = document.querySelectorAll('table.inventory tbody tr'), i = 0; a[i]; ++i) {
-		// get inventory row cells
-		cells = a[i].querySelectorAll('span:last-child');
-
-		// set price as cell[2] * cell[3]
-		price = parseFloatHTML(cells[2]) * parseFloatHTML(cells[3]);
-
-		// add price to total
-		total += price;
-
-		// set row total
-		cells[4].innerHTML = price;
-	}
-
-	// update balance cells
-	// ====================
-
-	// get balance cells
-	cells = document.querySelectorAll('table.balance td:last-child span:last-child');
-
-	// set total
-	cells[0].innerHTML = total;
-
-	// set balance and meta balance
-	cells[2].innerHTML = document.querySelector('table.meta tr:last-child td:last-child span:last-child').innerHTML = parsePrice(total - parseFloatHTML(cells[1]));
-
-	// update prefix formatting
-	// ========================
-
-	var prefix = document.querySelector('#prefix').innerHTML;
-	for (a = document.querySelectorAll('[data-prefix]'), i = 0; a[i]; ++i) a[i].innerHTML = prefix;
-
-	// update price formatting
-	// =======================
-
-	for (a = document.querySelectorAll('span[data-prefix] + span'), i = 0; a[i]; ++i) if (document.activeElement != a[i]) a[i].innerHTML = parsePrice(parseFloatHTML(a[i]));
-}
-
-/* On Content Load
-/* ========================================================================== */
-
-function onContentLoad() {
-	updateInvoice();
-
-	var
-	input = document.querySelector('input'),
-	image = document.querySelector('img');
-
-	function onClick(e) {
-		var element = e.target.querySelector('[contenteditable]'), row;
-
-		element && e.target != document.documentElement && e.target != document.body && element.focus();
-
-		if (e.target.matchesSelector('.add')) {
-			document.querySelector('table.inventory tbody').appendChild(generateTableRow());
+			prevScroll = curScroll;
+		};
+		
+		const updateOffset = function() {
+			mode = getStickyMode($element);
+			menuWrapperHeight = $element.outerHeight();
+			if (!$element.hasClass(cssClass)) {
+				offset = $element.offset().top;
+			}
+			if (mode === 'sticky_banner' && !$banner.length) {
+				mode = 'sticky_menu';
+			}
+			if (mode === 'sticky_banner') {
+				triggerPos = $banner.offset().top + ($banner.length ? $banner.outerHeight() : $element.outerHeight());
+			}
+			if (mode === 'sticky_menu' || mode === 'sticky_reverse') {
+				triggerPos = offset + $element.outerHeight();
+			}
+			if (mode === 'sticky_instant') {
+				triggerPos = offset;
+			}
+			
+			handleScroll();
 		}
-		else if (e.target.className == 'cut') {
-			row = e.target.ancestorQuerySelector('tr');
+		
+		viewport.observe('resize', updateOffset);
+		viewport.observe('animation.end', updateOffset);
+		observeHeightChange($element[0], updateOffset);
+		updateOffset();
+		
+		viewport.observe('scroll', handleScroll);
+		handleScroll();
+	};
 
-			row.parentNode.removeChild(row);
+	/**
+	 * Adds a class to links whose target is currently inside the viewport
+	 * 
+	 * @param {jQuery} $links Link(s) to be observed
+	 * @param {string} cssClass CSS Class to be applied
+	 * @param {float} sectionViewportRatio Ratio by which the target should be within the viewport
+	 */
+	const addClassOnVisibleLinkTargets = function($links, cssClass, sectionViewportRatio) {
+		if (typeof sectionViewportRatio === 'undefined') {
+			sectionViewportRatio = 1 / 2;
 		}
 
-		updateInvoice();
-	}
+		const menuTargets = [];
+		const activeLink = $links.filter('.active');
 
-	function onEnterCancel(e) {
-		e.preventDefault();
+		const links = $links.filter(function() {
+			const $target = $(this.hash);
+			if (!$target.length) {
+				return false;
+			}
 
-		image.classList.add('hover');
-	}
+			// Cache offset position to improve performance (update on resize)		
+			const updateOffset = function() {
+				$target.data('offset', $target.offset().top);
+			};
 
-	function onLeaveCancel(e) {
-		e.preventDefault();
+			viewport.observe('resize', updateOffset);
+			viewport.observe('animation.end', updateOffset);
+			updateOffset();
 
-		image.classList.remove('hover');
-	}
+			menuTargets.push($target);
+			return true;
+		});
 
-	function onFileInput(e) {
-		image.classList.remove('hover');
+		// No hash links found, so don't handle it at all
+		if (!links.length) {
+			return;
+		}
 
-		var
-		reader = new FileReader(),
-		files = e.dataTransfer ? e.dataTransfer.files : e.target.files,
-		i = 0;
+		const checkVisibility = function() {
+			$links.removeClass('active');
 
-		reader.onload = onFileLoad;
+			// Check section position reversely
+			for (let i = menuTargets.length - 1; i >= 0; i--) {
+				const desiredScrollPosition = menuTargets[i].data('offset') - viewport.getHeight() * (1 - sectionViewportRatio);
+				if (viewport.getScrollTop() >= desiredScrollPosition && menuTargets[i][0].offsetParent !== null) {
+					links.eq(i).addClass(cssClass);
+					return;
+				}
+			}
 
-		while (files[i]) reader.readAsDataURL(files[i++]);
-	}
+			// Fallback to originally active item
+			activeLink.addClass(cssClass);
+		};
 
-	function onFileLoad(e) {
-		var data = e.target.result;
+		viewport.observe('scroll', checkVisibility);
+		checkVisibility();
+	};
+})();
+/* End JS for preset "Menu V2" */
 
-		image.src = data;
-	}
-
-	if (window.addEventListener) {
-		document.addEventListener('click', onClick);
-
-		document.addEventListener('mousewheel', updateNumber);
-		document.addEventListener('keydown', updateNumber);
-
-		document.addEventListener('keydown', updateInvoice);
-		document.addEventListener('keyup', updateInvoice);
-
-		input.addEventListener('focus', onEnterCancel);
-		input.addEventListener('mouseover', onEnterCancel);
-		input.addEventListener('dragover', onEnterCancel);
-		input.addEventListener('dragenter', onEnterCancel);
-
-		input.addEventListener('blur', onLeaveCancel);
-		input.addEventListener('dragleave', onLeaveCancel);
-		input.addEventListener('mouseout', onLeaveCancel);
-
-		input.addEventListener('drop', onFileInput);
-		input.addEventListener('change', onFileInput);
-	}
-}
-
-window.addEventListener && document.addEventListener('DOMContentLoaded', onContentLoad);
+/* JS for preset "Back to top button V3" */
+(function() {
+    var initBackToTop = function() {
+        var $button = $('.back-to-top-button-icon');
+        
+    	clickToTop($button);
+    	
+    	// Show back to top only below the fold
+    	viewport.observe('scroll', function() {
+    		if (viewport.getScrollTop() > (viewport.getHeight() / 3)) {
+    			$button.addClass('show');
+    		} else {
+    			$button.removeClass('show');
+    		}
+    	});
+    };
+    
+    var clickToTop = function($trigger) {
+    	$trigger.removeClass('show');
+    
+    	$trigger.click(function(e) {
+    		e.preventDefault();
+    		viewport.scrollTo(0, 'top', 500, 0);
+    	});
+    };
+    
+    $(initBackToTop);
+})();
+/* End JS for preset "Back to top button V3" */
